@@ -281,7 +281,7 @@ function httpParser(stream, isRequest){
             self.emit("open");
         }
     }
-    stream.on("end",function(){
+    stream.on("close",function(){
         self.emit("end");
         self.emit("close");
     });
@@ -290,6 +290,7 @@ function httpParser(stream, isRequest){
         state = protocolError;
         self.emit("error",msg);
         self.emit("end");
+        self.emit("close");
         stream.removeAllListeners();        
     }
 
