@@ -1,5 +1,6 @@
 var events = require("events");
 var util = require("util");
+var streams = require("stream");
 
 
 //enum generator
@@ -36,7 +37,7 @@ var protocolError = n();
 
 //httpParser class
 function httpParser(stream, isRequest){
-    var self = new events.EventEmitter();
+    var self = new streams.Readable();
     
 
     var majorVersion = 1;
@@ -44,6 +45,9 @@ function httpParser(stream, isRequest){
     self.httpVersion = 1.1;
     self.headers = {};
     self.connection = stream;
+	
+	
+	var queue = [];
     
     if(isRequest){
         self.method = "";
@@ -52,32 +56,26 @@ function httpParser(stream, isRequest){
         self.statusCode = "";
         self.statusMessage = "";        
     }
-    
-    self.readable = true;
-    self.pipe = function(target){
-        util.pump(self,target);
-        return target;
-    }
-    self.pause = stream.pause;
-    self.resume = stream.resume;
-
+	
+	self._read = function(){
+	}
     
     var headerName = "";
-    var headerValue = "";
-    
+    var headerValue = "";    
     var state = isRequest?readingMethod:readingMajorVersionH;
-    
+	var alldata = "";
     stream.on("data",function(d){
-
         if(state == readingBody){
-            self.emit("data",d);
+            self.push(d);
             return;
         }
+		
+		alldata += d;
+	
         var ascii = d.toString("binary");
         
         for(var i = 0; i < d.length; i++){
             var c = ascii[i];
-            //console.log("charcode",c.charCodeAt(0),/*"char",c,*/"state",state);
             switch(state){
                 case readingMethod:
                     if(c == " "){
@@ -245,7 +243,7 @@ function httpParser(stream, isRequest){
                     break;
                 case readingHeaderValue:
                     if(c == "\r" || c == "\n"){
-                        state = (c == "\r")?readingNextLineLF:readingHeaderName;                        
+                        state = (c == "\r")?readingNextLineLF:readingHeaderNameStart;                        
                         self.headers[headerName.toLowerCase()] = headerValue;                        
                         headerName = "";
                         headerValue = "";
@@ -261,7 +259,7 @@ function httpParser(stream, isRequest){
                     }
                     break;
                 case readingBody:
-                    self.emit("data",d.slice(i));
+                    self.push(d.slice(i));
                     return;                    
                 
             }
@@ -271,6 +269,7 @@ function httpParser(stream, isRequest){
         }
         
     });
+	stream.resume();
     
     
     function open(){
@@ -281,6 +280,8 @@ function httpParser(stream, isRequest){
             self.emit("open");
         }
     }
+	
+	
     stream.on("close",function(){
         self.emit("end");
         self.emit("close");
@@ -298,14 +299,16 @@ function httpParser(stream, isRequest){
 }
 
 function httpResponse(c){
-    var res = new events.EventEmitter();
+    var res = Object.create(streams.Writable.prototype);
+	streams.Writable.call(res);
     res._headers = {};
     res.statusCode = 200;
     res.reasonPhrase = "OK";
     res.majorVersion = 1;
     res.minorVersion = 1;
     res.connection = c;
-    res.writable = true;
+	
+	res.write = res.write;
     
     var headerWritten = false;
     res.writeHead = function(statusCode,reason,headers){
@@ -322,30 +325,35 @@ function httpResponse(c){
                 res._headers = headers;
             }
             try{
-                c.write("HTTP/"+res.majorVersion+"."+res.minorVersion+" "+res.statusCode+" "+res.reasonPhrase+"\r\n");
-                for(var h in res._headers){
-                    c.write(h+": "+res._headers[h]+"\r\n");
+			
+				var head = "HTTP/"+res.majorVersion+"."+res.minorVersion+" "+res.statusCode+" "+res.reasonPhrase+"\r\n";
+				for(var h in res._headers){
+                    head += (h+": "+res._headers[h]+"\r\n");
                 }
-                c.write("\r\n");
+				head += "\r\n";
+                c.write(head);
             }catch(e){
+				console.log(e);
             }
             headerWritten = true;
         }
     }
-    res.write = function(a,b){
-        res.writeHead();
-        try{
-            c.write(a,b);
-        }catch(e){
-        }
-    }
-    res.end = function(a,b){
-        res.writeHead();
-        try{
-            c.end(a,b);
-        }catch(e){
-        }
-    }
+
+	
+	res._write = function(a,b,cb){
+		res.writeHead();
+		c.write(a,b);		
+		cb();
+	}
+	
+	res._end = res.end;
+	res.end = function(a,b,cb){
+		res.writeHead();
+		res._end(a,b,cb);		
+		c.end();
+
+	}
+    
     res.setHeader = function(key,value){
         res._headers[key.toLowerCase()] = value;
     }
@@ -356,6 +364,7 @@ function httpResponse(c){
         delete res._headers[key.toLowerCase()];
     }
     
+	
     return res;
 }
 
