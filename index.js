@@ -38,7 +38,7 @@ var protocolError = n();
 //httpParser class
 function httpParser(stream, isRequest){
     var self = new streams.Readable();
-    
+    var response;
 
     var majorVersion = 1;
     var minorVersion = 1;
@@ -275,23 +275,33 @@ function httpParser(stream, isRequest){
     function open(){
         state = readingBody;
         if(isRequest){
-            self.emit("open",new httpResponse(stream));
+            self.emit("open",response = new httpResponse(stream));
         }else{
             self.emit("open");
         }
     }
 	
-	
-    stream.on("close",function(){
-        self.emit("end");
-        self.emit("close");
-    });
+	stream.on("end",close);
+    stream.on("close",close);
+	var closed = false;
+	function close(){
+		if(!closed){
+			self.emit("end");
+			if(response){
+				response.on("finish",function(){
+					self.emit("close");
+				});
+			}else{
+				self.emit("close");
+			}
+			closed = true;
+		}
+	}
     
     function error(msg){
         state = protocolError;
         self.emit("error",msg);
-        self.emit("end");
-        self.emit("close");
+		close();
         stream.removeAllListeners();        
     }
 
@@ -333,7 +343,7 @@ function httpResponse(c){
 				head += "\r\n";
                 c.write(head);
             }catch(e){
-				console.log(e);
+				console.log("err",e);
             }
             headerWritten = true;
         }
@@ -349,9 +359,11 @@ function httpResponse(c){
 	res._end = res.end;
 	res.end = function(a,b,cb){
 		res.writeHead();
-		res._end(a,b,cb);		
+		res._end(a,b,cb);
+		c.on("finish",function(){
+			res.emit("finish");
+		});
 		c.end();
-
 	}
     
     res.setHeader = function(key,value){
