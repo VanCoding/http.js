@@ -58,6 +58,7 @@ function httpParser(stream, isRequest){
     }
 	
 	self._read = function(){
+		
 	}
     
     var headerName = "";
@@ -334,8 +335,7 @@ function httpResponse(c){
             }else if(reason){
                 res._headers = headers;
             }
-            try{
-			
+            try{			
 				var head = "HTTP/"+res.majorVersion+"."+res.minorVersion+" "+res.statusCode+" "+res.reasonPhrase+"\r\n";
 				for(var h in res._headers){
                     head += (h+": "+res._headers[h]+"\r\n");
@@ -349,22 +349,18 @@ function httpResponse(c){
         }
     }
 
-	
+	res.end = res.end;
+	res.write = res.write;
+
 	res._write = function(a,b,cb){
-		res.writeHead();
-		c.write(a,b);		
+		res.writeHead();		
+		c.write(a,b);
 		cb();
 	}
-	
-	res._end = res.end;
-	res.end = function(a,b,cb){
+	res.on("finish",function(){
 		res.writeHead();
-		res._end(a,b,cb);
-		c.on("finish",function(){
-			res.emit("finish");
-		});
 		c.end();
-	}
+	});
     
     res.setHeader = function(key,value){
         res._headers[key.toLowerCase()] = value;
